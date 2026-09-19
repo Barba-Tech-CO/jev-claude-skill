@@ -72,6 +72,19 @@ The environment variable wins over the stored file when both exist.
 Check credentials and connectivity: `python3 scripts/jev.py doctor` (it spends one ~USD 0.00002
 call per configured provider).
 
+Measure a question set before trusting it — replay hand-labelled cases and read the
+calibration, not just the accuracy:
+
+```bash
+python3 scripts/jev.py eval --questions route.json --cases cases.json
+```
+
+A case is `{"state": …, "expect": {"<question>": <answer>}}` — an option key for a `choice`,
+a level index or label for a `score`, `true`/`false` for a `boolean`. The report gives overall
+and per-question accuracy, the misses, and accuracy split by confidence band. High confidence
+that is no more accurate than low confidence means the question is badly written, not that the
+model is wrong. Twenty cases cost about USD 0.0004.
+
 Offline tests, no key needed: `python3 -m unittest discover -s tests`.
 
 ## Providers
@@ -100,13 +113,21 @@ questions})` from the `ai` package — same question schema, so this script's JS
 personal data before the call. Send the turn, not the whole transcript; send a passage, not the
 file path or store id.
 
-**Fail open.** `no_key`, `network`, `rate_limited`, `timeout`, `malformed` — every failure exits
-non-zero with a JSON error on stderr and no answer. When that happens, proceed with your own
-judgment and say a Jev call failed. Never guess an answer on Jev's behalf.
+**Fail open, honestly.** `no_key`, `network`, `rate_limited`, `timeout`, `malformed` — every
+failure exits non-zero with a JSON error on stderr and no answer. Fall back to a rule you can
+state out loud (keep the current model, keep every passage, take the cheapest option) and say
+a Jev call failed. Never fabricate an answer or a confidence to keep the pipeline flowing: a
+made-up classification is worse than an admitted gap, because everything downstream trusts it.
+
+**Spend the call only on judgment.** Anything pure code can settle — a hard constraint, a
+required capability, a budget ceiling, an exact-match rule — is settled before the request, not
+asked. Filter first, then ask Jev about what is left, and never ask a question whose answer you
+would override anyway.
 
 **Confidence is data, not truth.** A `score` that averages to the middle of the rubric can mean
 "medium" or "no idea" — read `probabilities`, not just the number. Below ~0.6 confidence on a
-`choice`, treat it as no answer.
+`choice`, treat it as no answer and take a fixed, stated default (the safe end, the cheap end,
+the current behavior) rather than the winning option by a hair.
 
 **Bound the blast radius.** Only let Jev pick from options you already judged safe. A destructive
 or irreversible branch (delete, deploy, payment, migration) is never decided by a probability —
@@ -114,10 +135,16 @@ confirm with the user.
 
 ## Recipes
 
-- **Routing**: `choice` over model or agent names, with one line of criteria each. Shadow-mode
-  it first — log the pick, keep your current behavior — before letting it switch anything.
+- **Routing**: do not hand Jev the candidate list. Ask about the *request* — domain, how much
+  reasoning it needs, does it need long context or vision, is it latency-sensitive — and let
+  plain code rank the live candidates against that profile. The option set then costs nothing
+  when it changes, stays under the 255-option ceiling, and the same profile drives price,
+  capability and safety rules at once. Shadow-mode it first: log the pick, keep the current
+  behavior, and compare.
 - **Memory filter**: one request, one `boolean` per passage (`"Does this passage help answer the
   query?"`), batched ~60 at a time with passages renamed `P0`, `P1`… Drop what scores low.
 - **Triage**: `choice` for kind, `score` for urgency, `boolean` for "must a human see this".
 - **Grading**: `score` against an explicit rubric you wrote; pair with a `boolean` for hard
   rule breaks.
+
+- **Evaluation**: hand-label 20+ cases, run `jev.py eval`, and rewrite any question whose high-confidence band is no more accurate than its low-confidence one.
