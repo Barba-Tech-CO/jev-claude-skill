@@ -87,5 +87,35 @@ class JevTest(unittest.TestCase):
               transport=self.fake({}))
 
 
+  def test_eval_scores_hits_misses_and_calibration(self):
+    os.environ['TYPESAFE_API_KEY'] = 'k'
+    replies = iter([
+      {'answers': {'team': {'type': 'choice', 'choice': 'technical',
+                            'probabilities': {'technical': 0.95, 'billing': 0.05}, 'confidence': 0.95},
+                   'anger': {'type': 'score', 'score': 2.0, 'probabilities': {}}}},
+      {'answers': {'team': {'type': 'choice', 'choice': 'billing',
+                            'probabilities': {'billing': 0.55, 'technical': 0.45}, 'confidence': 0.55},
+                   'anger': {'type': 'score', 'score': 0.0, 'probabilities': {}}}},
+    ])
+    def transport(url, body, headers, timeout):
+      return json.dumps(next(replies)).encode('utf-8')
+    questions = {'team': self.questions['team'], 'anger': self.questions['anger']}
+    report = Jev.evaluate(questions, [
+      {'state': 'api is down', 'expect': {'team': 'technical', 'anger': 'Furious'}},
+      {'state': 'invoice question', 'expect': {'team': 'technical', 'anger': 0}},
+    ], transport=transport)
+    self.assertEqual((report['checks'], report['hits']), (4, 3))
+    self.assertEqual(report['per_question'], {'anger': 1.0, 'team': 0.5})
+    self.assertEqual(report['misses'][0]['question'], 'team')
+    self.assertEqual(report['calibration']['low <0.6']['accuracy'], 0.0)
+    self.assertEqual(report['calibration']['high >0.9']['accuracy'], 1.0)
+
+  def test_boolean_expectation_matches_on_the_half(self):
+    question = {'type': 'boolean', 'instructions': 'risky?'}
+    self.assertTrue(Jev.matches(True, {'type': 'boolean', 'probability': 0.5}, question))
+    self.assertTrue(Jev.matches(False, {'type': 'boolean', 'probability': 0.49}, question))
+    self.assertFalse(Jev.matches(True, {'type': 'boolean', 'probability': 0.2}, question))
+
+
 if __name__ == '__main__':
   unittest.main()

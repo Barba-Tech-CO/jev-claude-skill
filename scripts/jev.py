@@ -234,6 +234,74 @@ class Jev:
             'path': Jev.store(provider, key), 'key_length': len(key)}
 
   @staticmethod
+  def readSource(source: str) -> str:
+    """A path or the JSON itself."""
+    if os.path.exists(source):
+      with open(source, encoding='utf-8') as handle:
+        return handle.read()
+    return source
+
+  @staticmethod
+  def evaluate(questions: dict, cases: list, *, transport=None, provider: str = 'auto', model: str = '',
+               timeout: float = 10.0) -> dict:
+    """Replay labelled cases through one question set.
+
+    A case is {"state": ..., "expect": {"<question>": <expected answer>}}: an option key
+    for a choice, a level index or label for a score, true/false for a boolean. Reports
+    per-question accuracy and whether confidence is directionally calibrated — high
+    confidence should be right more often than low confidence, and a question where it
+    is not is a question worth rewriting.
+    """
+    rows, failures = [], []
+    for index, case in enumerate(cases):
+      try:
+        result = Jev.ask(case['state'], questions, provider=provider, model=model, timeout=timeout, transport=transport)
+      except Jev.Error as error:
+        failures.append({'case': index, 'error': error.code})
+        continue
+      for name, expected in (case.get('expect') or {}).items():
+        answer = result['answers'][name]
+        got, confidence = Jev.flatten(answer, questions[name])
+        rows.append({'case': index, 'question': name, 'expected': expected, 'got': got,
+                     'hit': Jev.matches(expected, answer, questions[name]),
+                     'confidence': confidence, 'cost': result['usage'].get('cost', 0.0)})
+    buckets = {'low <0.6': [], 'mid 0.6-0.9': [], 'high >0.9': []}
+    for row in rows:
+      key = 'low <0.6' if row['confidence'] < 0.6 else ('mid 0.6-0.9' if row['confidence'] <= 0.9 else 'high >0.9')
+      buckets[key].append(row['hit'])
+    questionNames = sorted({row['question'] for row in rows})
+    return {
+      'cases': len(cases), 'checks': len(rows), 'hits': sum(r['hit'] for r in rows),
+      'accuracy': round(sum(r['hit'] for r in rows) / len(rows), 3) if rows else 0.0,
+      'per_question': {name: round(sum(r['hit'] for r in rows if r['question'] == name) /
+                                   max(1, sum(1 for r in rows if r['question'] == name)), 3)
+                       for name in questionNames},
+      'calibration': {key: {'checks': len(hits), 'accuracy': round(sum(hits) / len(hits), 3)}
+                      for key, hits in buckets.items() if hits},
+      'cost': round(sum({row['case']: row['cost'] for row in rows}.values()), 6),
+      'misses': [r for r in rows if not r['hit']],
+      'failed_calls': failures,
+    }
+
+  @staticmethod
+  def flatten(answer: dict, question: dict):
+    if answer['type'] == 'boolean':
+      return answer['probability'], max(answer['probability'], 1 - answer['probability'])
+    if answer['type'] == 'choice':
+      return answer['choice'], answer['confidence']
+    return answer['label'], answer['confidence']
+
+  @staticmethod
+  def matches(expected, answer: dict, question: dict) -> bool:
+    if answer['type'] == 'boolean':
+      return (answer['probability'] >= 0.5) is bool(expected)
+    if answer['type'] == 'choice':
+      return answer['choice'] == expected
+    levels = question['criteria']
+    index = int(round(answer['score']))
+    return expected in (index, levels[min(len(levels) - 1, max(0, index))])
+
+  @staticmethod
   def doctor() -> dict:
     report = {}
     for name in Jev.order:
@@ -265,10 +333,25 @@ class Jev:
     ask.add_argument('--provider', default='auto', choices=['auto', 'typesafe', 'openrouter', 'vercel'])
     ask.add_argument('--model', default='')
     ask.add_argument('--timeout', type=float, default=10.0)
+    evaluate = sub.add_parser('eval')
+    evaluate.add_argument('--questions', required=True)
+    evaluate.add_argument('--cases', required=True, help='JSON list of {"state":…, "expect":{…}}')
+    evaluate.add_argument('--provider', default='auto', choices=['auto', 'typesafe', 'openrouter', 'vercel'])
+    evaluate.add_argument('--model', default='')
     sub.add_parser('doctor')
     setKey = sub.add_parser('set-key')
     setKey.add_argument('--provider', required=True, choices=['typesafe', 'openrouter', 'vercel'])
     args = parser.parse_args(argv)
+
+    if args.command == 'eval':
+      questions = json.loads(Jev.readSource(args.questions))
+      cases = json.loads(Jev.readSource(args.cases))
+      try:
+        print(json.dumps(Jev.evaluate(questions, cases, provider=args.provider, model=args.model), indent=2))
+      except Jev.Error as error:
+        print(json.dumps({'error': error.code, 'detail': str(error)}), file=sys.stderr)
+        return 1
+      return 0
 
     if args.command == 'doctor':
       print(json.dumps(Jev.doctor(), indent=2))
@@ -290,12 +373,8 @@ class Jev:
       state = args.state
     else:
       state = sys.stdin.read()
-    source = args.questions
-    if os.path.exists(source):
-      with open(source, encoding='utf-8') as handle:
-        source = handle.read()
     try:
-      questions = json.loads(source)
+      questions = json.loads(Jev.readSource(args.questions))
       result = Jev.ask(state, questions, provider=args.provider, model=args.model, timeout=args.timeout)
     except json.JSONDecodeError as error:
       print(json.dumps({'error': 'bad_questions_json', 'detail': str(error)}), file=sys.stderr)
