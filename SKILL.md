@@ -7,7 +7,7 @@ license: MIT
 # Jev — typed decisions, no prose
 
 Jev is TypeSafe's "System One" model. It writes no text. You send one `state` plus named
-typed questions; it answers all of them in one request (~0.4–1 s, ~$0.042/M input tokens,
+typed questions; it answers all of them in one request (~0.4–1 s, ~USD 0.042 per 1M input tokens,
 output free) with calibrated probabilities your code branches on.
 
 Your code owns the workflow; Jev only answers the questions you hand it.
@@ -69,7 +69,7 @@ python3 scripts/jev.py set-key --provider openrouter
 
 The environment variable wins over the stored file when both exist.
 
-Check credentials and connectivity: `python3 scripts/jev.py doctor` (it spends one ~$0.00002
+Check credentials and connectivity: `python3 scripts/jev.py doctor` (it spends one ~USD 0.00002
 call per configured provider).
 
 Offline tests, no key needed: `python3 -m unittest discover -s tests`.
