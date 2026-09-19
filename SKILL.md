@@ -1,6 +1,6 @@
 ---
 name: jev
-description: Use when a turn needs a fast, cheap, typed decision instead of prose — routing a request to a model/team/skill, classifying or triaging text, scoring output against a rubric, filtering retrieved passages, or a yes/no guardrail check. Calls TypeSafe's Jev decision model through TypeSafe direct, Vercel AI Gateway, or OpenRouter.
+description: Use when code needs a structured decision about some state rather than prose — route this to a model/team/queue, classify or triage these messages, rank or filter passages by relevance, score output against a rubric, verify a claim or guardrail as yes/no, or the same judgment repeated over many items in a loop or pipeline. Also use when the user mentions Jev, TypeSafe, System One, or the Decisions API. Calls TypeSafe's Jev through TypeSafe direct, Vercel AI Gateway, or OpenRouter, which answers with calibrated probabilities (noul, choice, score) and never text. Do not use for writing, explaining, summarizing, coding, or any answer a person reads.
 license: MIT
 ---
 
@@ -10,8 +10,29 @@ Jev is TypeSafe's "System One" model. It writes no text. You send one `state` pl
 typed questions; it answers all of them in one request (~0.4–1 s, ~$0.042/M input tokens,
 output free) with calibrated probabilities your code branches on.
 
-Use it when the decision is small and repeated. Do not use it to write, explain, or reason —
-that is still your job.
+Your code owns the workflow; Jev only answers the questions you hand it.
+
+## When to reach for it
+
+Fire on any of these, whether or not Jev is named:
+
+- **Routing** — which model, team, queue, agent, or skill this input belongs to.
+- **Classification and triage** — kind, priority, urgency, sentiment, "must a human see this".
+- **Ranking and filtering** — which retrieved passages, search hits, or candidates are worth
+  reading, and which carry injected instructions.
+- **Verification and guardrails** — does this output satisfy the rule, is this request
+  destructive, did the answer actually use the source.
+- **Grading** — position on a rubric you wrote, for evaluation sets or self-checks.
+- **Batch judgment** — the same small question asked over a list, a loop, or a pipeline stage,
+  where one LLM call per item would be slow and expensive.
+
+The shape that gives it away: the answer is consumed by an `if`, a sort, or a filter — not read
+by a person.
+
+**Do not fire** for writing, explaining, summarizing, translating, generating code, open-ended
+reasoning, or anything needing an answer longer than a label. Jev returns no text. One-off
+judgments you can make yourself in the turn do not need a network call either — reach for it
+when the decision repeats, must be calibrated, or must be the same every time.
 
 ## Question types
 
